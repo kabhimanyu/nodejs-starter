@@ -1,12 +1,11 @@
 const httpStatus = require('http-status');
+const User = require('@models/auth/user.model');
+const RefreshToken = require('@models/auth/refreshToken.model');
 const moment = require('moment-timezone');
+const { jwtExpirationInterval } = require('@config/vars');
 const { omit } = require('lodash');
-const User = require('../models/user.model');
-const RefreshToken = require('../models/refreshToken.model');
-const PasswordResetToken = require('../models/passwordResetToken.model');
-const { jwtExpirationInterval } = require('../../config/vars');
-const APIError = require('../errors/api-error');
-const emailProvider = require('../services/emails/emailProvider');
+const APIError = require('@utils/APIError');
+const Logger = require('@config/logger')
 
 /**
  * Returns a formated object with tokens
@@ -33,7 +32,7 @@ exports.register = async (req, res, next) => {
     const userData = omit(req.body, 'role');
     const user = await new User(userData).save();
     const userTransformed = user.transform();
-    const token = generateTokenResponse(user, user.token());
+    const token = generateTokenResponse(user, await user.token());
     res.status(httpStatus.CREATED);
     return res.json({ token, user: userTransformed });
   } catch (error) {
@@ -50,7 +49,7 @@ exports.login = async (req, res, next) => {
     const { user, accessToken } = await User.findAndGenerateToken(req.body);
     const token = generateTokenResponse(user, accessToken);
     const userTransformed = user.transform();
-    return res.json({ token, user: userTransformed });
+    return res.json({ token, user: userTransformed });    
   } catch (error) {
     return next(error);
   }

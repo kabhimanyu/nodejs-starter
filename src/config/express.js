@@ -6,20 +6,46 @@ const methodOverride = require('method-override');
 const cors = require('cors');
 const helmet = require('helmet');
 const passport = require('passport');
-const routes = require('../api/routes/v1');
-const { logs } = require('./vars');
-const strategies = require('./passport');
-const error = require('../api/middlewares/error');
-
+const routes = require('@api/routes/v1');
+const { logs,redis } = require('@config/vars');
+const strategies = require('@config/passport');
+const error = require('@api/middlewares/error');
+const { expressSharp,FsAdapter } = require('express-sharp');
+const Keyv = require('keyv');
+const path = require('path');
+const cache = new Keyv(redis);
+const audit = require('express-requests-logger')
+const logger = require('./logger')
 /**
 * Express instance
 * @public
 */
 const app = express();
+app.use(audit({
+    logger: logger, // Existing bunyan logger
+    excludeURLs: ['health', 'metrics'], // Exclude paths which enclude 'health' & 'metrics'
+    request: {
+        maskBody: ['password'], // Mask 'password' field in incoming requests
+        excludeHeaders: ['authorization'], // Exclude 'authorization' header from requests
+        excludeBody: ['creditCard'], // Exclude 'creditCard' field from requests body
+        maskHeaders: [''], // Mask 'header1' header in incoming requests
+        maxBodyLength: 5000 // limit length to 50 chars + '...'
+    },
+    response: {
+        maskBody: ['session_token'], // Mask 'session_token' field in response body
+        excludeHeaders: ['*'], // Exclude all headers from responses,
+        excludeBody: ['*'], // Exclude all body from responses
+        maskHeaders: [''], // Mask 'header1' header in incoming requests
+        maxBodyLength: 5000 // limit length to 50 chars + '...'
+    }
+}));
 
 // request logging. dev: console | production: file
 app.use(morgan(logs));
-
+app.use('/static', expressSharp({
+    cache,
+    imageAdapter: new FsAdapter(path.join(__dirname, '../../public')),
+ }))
 // parse body params and attache them to req.body
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -54,5 +80,8 @@ app.use(error.notFound);
 
 // error handler, send stacktrace only during development
 app.use(error.handler);
+
+
+
 
 module.exports = app;

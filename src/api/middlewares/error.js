@@ -1,8 +1,8 @@
 const httpStatus = require('http-status');
 const expressValidation = require('express-validation');
-const APIError = require('../errors/api-error');
-const { env } = require('../../config/vars');
-
+const APIError = require('@errors/api-error');
+const { env } = require('@config/vars');
+const Logger = require('@config/logger')
 /**
  * Error handler. Send stacktrace only during development
  * @public
@@ -18,7 +18,13 @@ const handler = (err, req, res, next) => {
   if (env !== 'development') {
     delete response.stack;
   }
-
+  Logger.error({
+    code: err.status,
+    error: err.message || httpStatus[err.status],
+    errors: err.errors,
+    stack: err.stack,
+    body: req.body
+  })
   res.status(err.status);
   res.json(response);
 };

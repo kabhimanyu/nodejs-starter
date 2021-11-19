@@ -5,52 +5,76 @@ const bcrypt = require('bcryptjs');
 const moment = require('moment-timezone');
 const jwt = require('jwt-simple');
 const uuidv4 = require('uuid/v4');
-const APIError = require('../errors/api-error');
-const { env, jwtSecret, jwtExpirationInterval } = require('../../config/vars');
+const APIError = require('@utils/APIError');
+const { env, jwtSecret, jwtExpirationInterval } = require('@config/vars');
+const LoginSession = require("@models/auth/login.session")
 
 /**
 * User Roles
 */
-const roles = ['user', 'admin'];
-
+const roles = ['USER', 'ADMIN'];
+const Genders = ['MALE', 'FEMALE', 'OTHER'];
 /**
  * User Schema
  * @private
  */
 const userSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    match: /^\S+@\S+\.\S+$/,
-    required: true,
-    unique: true,
-    trim: true,
-    lowercase: true,
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6,
-    maxlength: 128,
-  },
-  name: {
+  firstName: {
     type: String,
     maxlength: 128,
     index: true,
     trim: true,
   },
-  services: {
+  lastName: {
+    type: String,
+    maxlength: 128,
+    index: true,
+    trim: true,
+  },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+  },
+  phone: {
+    type: String,
+    trim: true,
+    index: true,
+    maxlength: 15,
+  },
+  dateOfBirth: {
+    type: Date,
+  },
+  gender: {
+    type: String,
+    enum: Genders
+  },
+  password: {
+    type: String,
+    minlength: 6,
+    maxlength: 128,
+  },
+  loginInfo: {
+    signinCount: Number,
+    failedAttempts: Number,
+    lockedAt: Date,
+    confirmedAt: Date,
+    confirmationToken: String,
+    confirmationSentAt: Date
+  },
+  services: { // Future use social auth
     facebook: String,
     google: String,
   },
   role: {
     type: String,
     enum: roles,
-    default: 'user',
+    default: 'USER',
   },
-  picture: {
-    type: String,
-    trim: true,
-  },
+  displayPicture: { 
+    type: String
+  }
+
 }, {
   timestamps: true,
 });
@@ -82,7 +106,7 @@ userSchema.pre('save', async function save(next) {
 userSchema.method({
   transform() {
     const transformed = {};
-    const fields = ['id', 'name', 'email', 'picture', 'role', 'createdAt'];
+    const fields = ['id', 'firstName', 'lastName', 'phone', 'email', 'dateOfBirth', 'gender', 'displayPicture', 'role', 'createdAt'];
 
     fields.forEach((field) => {
       transformed[field] = this[field];
@@ -91,17 +115,24 @@ userSchema.method({
     return transformed;
   },
 
-  token() {
+  async token(device, ip) {
     const payload = {
-      exp: moment().add(jwtExpirationInterval, 'minutes').unix(),
-      iat: moment().unix(),
-      sub: this._id,
+      entity: this,
+      firstName: this.firstName,
+      lastName: this.lastName,
+      role: this.role,
+      ipAddress: ip,
+      type: 'USER',
+      device,
+      channel: 'MOBILE'
     };
-    return jwt.encode(payload, jwtSecret);
+    const sessionToken = await LoginSession.createSession(payload)
+    const token = await jwt.encode(sessionToken, jwtSecret)
+    return token
   },
 
-  async passwordMatches(password) {
-    return bcrypt.compare(password, this.password);
+  async passwordMatches(password) { 
+    return bcrypt.compareSync(password, this.password);
   },
 });
 
@@ -119,19 +150,23 @@ userSchema.statics = {
    * @returns {Promise<User, APIError>}
    */
   async get(id) {
-    let user;
+    try {
+      let user;
 
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      user = await this.findById(id).exec();
-    }
-    if (user) {
-      return user;
-    }
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        user = await this.findById(id).exec();
+      }
+      if (user) {
+        return user;
+      }
 
-    throw new APIError({
-      message: 'User does not exist',
-      status: httpStatus.NOT_FOUND,
-    });
+      throw new APIError({
+        message: 'User does not exist',
+        status: httpStatus.NOT_FOUND,
+      });
+    } catch (error) {
+      throw error;
+    }
   },
 
   /**
@@ -141,24 +176,27 @@ userSchema.statics = {
    * @returns {Promise<User, APIError>}
    */
   async findAndGenerateToken(options) {
-    const { email, password, refreshObject } = options;
-    if (!email) throw new APIError({ message: 'An email is required to generate a token' });
-
-    const user = await this.findOne({ email }).exec();
+    const { email, phone, password, device, ip, refreshObject } = options;
+    if (!email) throw new APIError({ message: 'A phone is required to generate a token' });
+    let user;
+    if(email){
+      user = await this.findOne({ email }).exec();
+    } else {
+      user = await this.findOne({ phone }).exec();
+    }
     const err = {
       status: httpStatus.UNAUTHORIZED,
       isPublic: true,
     };
-    if (password) {
-      if (user && await user.passwordMatches(password)) {
-        return { user, accessToken: user.token() };
-      }
-      err.message = 'Incorrect email or password';
+    if (password && await user.passwordMatches(password)) {
+      const accessToken = await user.token(device, ip);
+      return { user, accessToken };
     } else if (refreshObject && refreshObject.userEmail === email) {
       if (moment(refreshObject.expires).isBefore()) {
         err.message = 'Invalid refresh token.';
       } else {
-        return { user, accessToken: user.token() };
+        const accessToken = await user.token(device, ip);
+        return { user, accessToken };
       }
     } else {
       err.message = 'Incorrect email or refreshToken';

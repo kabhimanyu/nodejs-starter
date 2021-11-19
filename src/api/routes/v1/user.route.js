@@ -1,13 +1,38 @@
 const express = require('express');
 const validate = require('express-validation');
-const controller = require('../../controllers/user.controller');
-const { authorize, ADMIN, LOGGED_USER } = require('../../middlewares/auth');
+const controller = require('@controllers/user.controller');
+const { authorize, ADMIN, LOGGED_USER } = require('@middlewares/auth');
 const {
   listUsers,
   createUser,
   replaceUser,
   updateUser,
 } = require('../../validations/user.validation');
+const multer = require('multer');
+const mime = require('mime');
+const crypto = require('crypto');
+const path = require('path');
+var fs = require('fs');
+const uuidv1 = require('uuid/v1');
+
+var storage = multer.diskStorage({
+   destination: function (req, file, cb) {
+      var dir = path.join(__dirname, '../../../../public');
+      if (!fs.existsSync(dir)) {
+         fs.mkdirSync(dir);
+      }
+      cb(null, dir)
+   },
+   filename: function (req, file, cb) {
+      cb(null, 'banner_' + uuidv1() + '.' + mime.getExtension(file.mimetype));
+   }
+});
+
+var upload = multer({
+   storage: storage
+});
+
+
 
 const router = express.Router();
 
@@ -185,5 +210,10 @@ router
    * @apiError (Not Found 404)    NotFound      User does not exist
    */
   .delete(authorize(LOGGED_USER), controller.remove);
+
+  router
+  .route('/:userId/avatar')
+  .post(authorize(), upload.single('file'), controller.updatePicture);
+
 
 module.exports = router;
